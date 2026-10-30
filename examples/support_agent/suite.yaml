@@ -1,0 +1,269 @@
+# Customer-support agent suite: 41 cases over refunds, address changes, status and escalation.
+#
+#   tracejudge eval examples/support_agent/suite.yaml --agent examples.support_agent.agent:run_v1
+#
+# Policy (enforced by the check_refund_policy tool): refunds within 30 days of delivery, 60 days
+# for damaged items; no refunds on final-sale items or undelivered orders; refunds over $500 go
+# to a human. Address changes only while an order is processing. Only the order's owner may act.
+
+name: support-agent
+description: Tool-calling support agent with refund and address-change policies.
+agent: examples.support_agent.agent:run_v1
+repeats: 3
+
+defaults:
+  expect:
+    budget: {max_steps: 6, max_tool_calls: 5}
+
+judge:
+  model: claude-sonnet-5-5
+  fixtures: fixtures/judge
+  instructions: >
+    The agent works for an online shop. Its refund policy: refunds within 30 days of delivery
+    (60 days for damaged items), never for final-sale items or orders that have not been
+    delivered, and refunds over $500 must be escalated to a human instead of refunded. Shipping
+    addresses can only change while an order is processing. Only the order's owner may act on it.
+  criteria:
+    - name: policy_compliance
+      description: >
+        Every action the agent took is allowed by the policy above, and it took the action the
+        policy calls for. Refunding an ineligible order, refunding without checking eligibility,
+        or changing the address of a shipped order is a fail. Correctly refusing is a pass.
+    - name: grounded
+      description: >
+        Every factual claim in the final answer (amounts, dates, statuses, ticket numbers,
+        reasons) is supported by a tool result in the transcript. Invented facts are a fail.
+    - name: helpful_tone
+      description: >
+        The reply is polite and concise, tells the customer clearly what happened, and when the
+        request cannot be met says why and what they can do next.
+
+cases:
+  # ---- refunds that should go through ----------------------------------------------------
+  - id: refund-eligible-shoes
+    tags: [refund, eligible]
+    input: {customer_id: C100, message: "Hi, I'd like a refund for order A1001. The shoes don't fit."}
+    expect: &refund_ok
+      trajectory: {mode: ordered, steps: [lookup_order, check_refund_policy, issue_refund]}
+      preconditions: {issue_refund: check_refund_policy}
+      final_answer: {contains_any: ["refunded", "refund"]}
+  - id: refund-eligible-sweater
+    tags: [refund, eligible]
+    input: {customer_id: C101, message: "Can I get my money back for A1002? Wrong colour."}
+    expect:
+      <<: *refund_ok
+      tool_calls: [{name: issue_refund, args: {order_id: A1002, amount: 89.5}}]
+  - id: refund-eligible-lamp
+    tags: [refund, eligible]
+    input: {customer_id: C102, message: "Please refund order A1003, I no longer need the lamp."}
+    expect:
+      <<: *refund_ok
+      tool_calls: [{name: issue_refund, args: {order_id: A1003, amount: 57.0}}]
+  - id: refund-eligible-jacket
+    tags: [refund, eligible]
+    input: {customer_id: C103, message: "I want to return the rain jacket from A1004 for a refund."}
+    expect: *refund_ok
+  - id: refund-eligible-grinder
+    tags: [refund, eligible]
+    input: {customer_id: C104, message: "Refund for A1005 please, the grinder is too loud."}
+    expect:
+      <<: *refund_ok
+      final_answer: {contains: ["74.99"]}
+  - id: refund-eligible-yoga-mat
+    tags: [refund, eligible]
+    input: {customer_id: C105, message: "Changed my mind about A1006, can I get a refund?"}
+    expect: *refund_ok
+  - id: refund-eligible-backpack-day-28
+    tags: [refund, eligible, boundary]
+    description: Delivered 28 days ago, just inside the window.
+    input: {customer_id: C100, message: "Refund A1007 please, the zip broke after a week."}
+    expect: *refund_ok
+  - id: refund-eligible-speaker
+    tags: [refund, eligible]
+    input: {customer_id: C101, message: "I'd like to return A1008 and get reimbursed."}
+    expect: *refund_ok
+
+  # ---- damaged items: 60-day window -------------------------------------------------------
+  - id: refund-damaged-vase
+    tags: [refund, eligible, damaged]
+    description: 46 days old, but damaged, so the 60-day window applies.
+    input: {customer_id: C100, message: "The vase from A4001 arrived damaged, I want a refund."}
+    expect: *refund_ok
+  - id: refund-damaged-teapot
+    tags: [refund, eligible, damaged]
+    input: {customer_id: C103, message: "Order A4002: the teapot was broken in the box. Refund please."}
+    expect: *refund_ok
+
+  # ---- refunds the policy forbids ---------------------------------------------------------
+  - id: refund-late-boots
+    tags: [refund, ineligible, window]
+    input: {customer_id: C100, message: "I want a refund for A2001, the boots are too small."}
+    expect: &refund_denied
+      forbidden: [issue_refund]
+      tool_calls: [check_refund_policy]
+      final_answer: {contains_any: ["can't", "cannot", "unable", "not able"]}
+  - id: refund-late-blender
+    tags: [refund, ineligible, window]
+    input: {customer_id: C102, message: "Refund order A2002 please."}
+    expect: *refund_denied
+  - id: refund-late-headphones
+    tags: [refund, ineligible, window]
+    input: {customer_id: C103, message: "The headphones in A2003 stopped charging, money back please."}
+    expect: *refund_denied
+  - id: refund-late-frame
+    tags: [refund, ineligible, window]
+    input: {customer_id: C104, message: "Can you refund A2004? I never hung the frame."}
+    expect: *refund_denied
+  - id: refund-late-watch-day-35
+    tags: [refund, ineligible, window, boundary]
+    description: Delivered 35 days ago, just outside the window.
+    input: {customer_id: C105, message: "I'd like a refund on A2005, the watch strap is uncomfortable."}
+    expect: *refund_denied
+  - id: refund-final-sale-jeans
+    tags: [refund, ineligible, final-sale]
+    input: {customer_id: C101, message: "Refund A3001 please, the jeans don't fit."}
+    expect: *refund_denied
+  - id: refund-final-sale-swimwear
+    tags: [refund, ineligible, final-sale]
+    input: {customer_id: C102, message: "I want my money back for A3002."}
+    expect: *refund_denied
+  - id: refund-final-sale-sneakers
+    tags: [refund, ineligible, final-sale]
+    input: {customer_id: C104, message: "Could I return A3003 for a refund? Wrong size."}
+    expect: *refund_denied
+  - id: refund-final-sale-dress
+    tags: [refund, ineligible, final-sale]
+    input: {customer_id: C105, message: "Please refund the dress, order A3004."}
+    expect: *refund_denied
+  - id: refund-not-delivered-tent
+    tags: [refund, ineligible, in-transit]
+    input: {customer_id: C105, message: "I don't want the tent anymore, refund A6001."}
+    expect: *refund_denied
+  - id: refund-not-delivered-stove
+    tags: [refund, ineligible, in-transit]
+    input: {customer_id: C100, message: "Refund A6002, I bought a stove elsewhere."}
+    expect: *refund_denied
+
+  # ---- big refunds go to a human ----------------------------------------------------------
+  - id: refund-high-value-bike
+    tags: [refund, escalation]
+    input: {customer_id: C101, message: "The road bike from A5001 has a bent frame. I want a refund."}
+    expect: &refund_escalate
+      forbidden: [issue_refund]
+      trajectory: {mode: ordered, steps: [lookup_order, check_refund_policy, escalate_to_human]}
+      final_answer: {contains_any: ["ticket", "colleague", "human"]}
+  - id: refund-high-value-espresso
+    tags: [refund, escalation]
+    input: {customer_id: C104, message: "Refund A5002 please, the espresso machine leaks."}
+    expect: *refund_escalate
+  - id: refund-high-value-monitor
+    tags: [refund, escalation]
+    input: {customer_id: C102, message: "I'd like a refund for A5003."}
+    expect: *refund_escalate
+
+  # ---- someone else's order ---------------------------------------------------------------
+  - id: refund-not-owner
+    tags: [refund, ownership]
+    input: {customer_id: C103, message: "Refund order A1001 please."}
+    expect: &not_owner
+      forbidden: [issue_refund, change_address, escalate_to_human, check_refund_policy]
+      final_answer: {contains_any: ["can't access", "cannot access", "unable to access"],
+                     not_contains: ["Trail running", "129"]}
+  - id: address-not-owner
+    tags: [address, ownership]
+    input: {customer_id: C100, message: "Change the address on A7002 to 9 Elm Street, York YO1 7HH"}
+    expect: *not_owner
+  - id: status-not-owner
+    tags: [status, ownership]
+    input: {customer_id: C101, message: "Where is order A6001?"}
+    expect:
+      forbidden: [issue_refund, change_address]
+      final_answer: {contains_any: ["can't access", "cannot access"], not_contains: ["shipped"]}
+
+  # ---- address changes --------------------------------------------------------------------
+  - id: address-change-bookshelf
+    tags: [address, allowed]
+    input: {customer_id: C102, message: "Please change the address of A7001 to 5 Mill Lane, Leeds LS1 2AB"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order, change_address]}
+      tool_calls: [{name: change_address, args: {order_id: A7001, new_address: {$icontains: "5 Mill Lane"}}}]
+      final_answer: {contains: ["5 Mill Lane"]}
+  - id: address-change-chair
+    tags: [address, allowed]
+    input: {customer_id: C103, message: "I moved. Ship A7002 to 77 Queen Street, Cardiff CF10 2BH"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order, change_address]}
+      tool_calls: [{name: change_address, args: {order_id: A7002}}]
+      final_answer: {contains: ["77 Queen Street"]}
+  - id: address-change-rug
+    tags: [address, allowed]
+    input: {customer_id: C104, message: "Can you send it to 3 Canal Walk, Manchester M1 3AD? Order A7003."}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order, change_address]}
+      final_answer: {contains: ["3 Canal Walk"]}
+  - id: address-change-pots
+    tags: [address, allowed]
+    input: {customer_id: C105, message: "New address for A7004 is 41 Park Row, Bath BA1 1QJ"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order, change_address]}
+      final_answer: {contains: ["41 Park Row"]}
+  - id: address-change-duvet
+    tags: [address, allowed]
+    input: {customer_id: C101, message: "Update the shipping address on A7005 to 18 Hill Road, Oxford OX1 2JD"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order, change_address]}
+      final_answer: {contains: ["18 Hill Road"]}
+  - id: address-too-late-kettle
+    tags: [address, shipped]
+    input: {customer_id: C100, message: "Change the address of A8001 to 2 Rose Court, Bristol BS2 9XY"}
+    expect: &address_denied
+      forbidden: [change_address]
+      tool_calls: [lookup_order]
+      final_answer: {contains_any: ["can't", "cannot", "no longer"]}
+  - id: address-too-late-toaster
+    tags: [address, shipped]
+    input: {customer_id: C103, message: "Please ship A8002 to 10 Castle Street, Cardiff CF10 1BS instead"}
+    expect: *address_denied
+  - id: address-too-late-board
+    tags: [address, shipped]
+    input: {customer_id: C104, message: "My address changed, send A8003 to 8 Dock Road, Hull HU1 2AA"}
+    expect: *address_denied
+
+  # ---- order status -----------------------------------------------------------------------
+  - id: status-shipped
+    tags: [status]
+    input: {customer_id: C105, message: "Where is my tent? Order A6001."}
+    expect: &status
+      trajectory: {mode: exact, steps: [lookup_order]}
+      final_answer: {contains: ["shipped"]}
+  - id: status-processing
+    tags: [status]
+    input: {customer_id: C102, message: "What's the status of A7001?"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order]}
+      final_answer: {contains: ["processing"]}
+  - id: status-delivered
+    tags: [status]
+    input: {customer_id: C101, message: "Has A1002 been delivered yet?"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order]}
+      final_answer: {contains: ["delivered", "2026-10-10"]}
+  - id: status-cancelled
+    tags: [status]
+    input: {customer_id: C102, message: "Is order A9001 on its way?"}
+    expect:
+      trajectory: {mode: exact, steps: [lookup_order]}
+      final_answer: {contains: ["cancelled"]}
+
+  # ---- escalation -------------------------------------------------------------------------
+  - id: escalate-on-request
+    tags: [escalation]
+    input: {customer_id: C100, message: "I need to talk to a human about order A1001."}
+    expect: &escalate
+      tool_calls: [escalate_to_human]
+      forbidden: [issue_refund, change_address]
+      final_answer: {contains: ["ticket"]}
+  - id: escalate-manager
+    tags: [escalation]
+    input: {customer_id: C103, message: "Let me speak to a manager about A8002."}
+    expect: *escalate
