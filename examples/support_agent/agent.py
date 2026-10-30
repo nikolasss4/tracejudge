@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 from examples.support_agent.data import fresh_db
-from examples.support_agent.prompts import SYSTEM_V1, SYSTEM_V2
+from examples.support_agent.prompts import SYSTEM_V1, SYSTEM_V2, SYSTEM_V3
 from examples.support_agent.simulated import SimulatedModel, _latency_scale
 from examples.support_agent.tools import TOOL_DEFS, TOOLS, use_db
 
@@ -89,3 +89,7 @@ def run_v1(inp: dict[str, Any]) -> str:
 
 def run_v2(inp: dict[str, Any]) -> str:
     return run_agent(inp, SYSTEM_V2)
+
+
+def run_v3(inp: dict[str, Any]) -> str:
+    return run_agent(inp, SYSTEM_V3)

@@ -123,3 +123,14 @@ def test_protobuf_export_from_real_otel_sdk(tmp_path: Path) -> None:
     kinds = {s.name: s.kind for s in t.spans}
     assert kinds == {"invoke_agent support": "agent", "chat claude-haiku-5-5": "llm"}
     assert t.total_tokens == 440
+
+
+def test_cli_imports_otlp_json(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from tracejudge.cli import app
+
+    db = tmp_path / "t.db"
+    result = CliRunner().invoke(app, ["import", str(DATA), "--db", str(db)])
+    assert result.exit_code == 0, result.output
+    assert Store(db).get_trace("5b8efff798038103d269b633813fc60c") is not None

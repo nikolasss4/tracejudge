@@ -50,3 +50,10 @@ def test_v2_regression_is_caught(tmp_path: Path) -> None:
     # Address and status flows are unchanged in v2; only the simulated model's rare seeded
     # slips can flip one of them in a single-trial run.
     assert len(regressed - refund_cases) <= 2
+
+
+def test_v3_fixes_it(tmp_path: Path) -> None:
+    store = Store(tmp_path / "t.db")
+    suite = load_suite(SUITE)
+    v3 = run_suite(suite, store, RunOptions(agent="examples.support_agent.agent:run_v3", repeats=1))
+    assert v3.summary["pass_rate"] > 0.9

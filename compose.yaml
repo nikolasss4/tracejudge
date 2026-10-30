@@ -1,0 +1,13 @@
+services:
+  tracejudge:
+    build: .
+    ports:
+      - "127.0.0.1:7600:7600"
+    volumes:
+      - tracejudge-data:/data
+    environment:
+      # Set to require `Authorization: Bearer <token>` on POST /v1/traces.
+      TRACEJUDGE_OTLP_TOKEN: ${TRACEJUDGE_OTLP_TOKEN:-}
+
+volumes:
+  tracejudge-data:

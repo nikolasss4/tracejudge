@@ -3,6 +3,8 @@
 v2 is a "make it friendlier" rewrite. It adds a confirmation rule (a real improvement) and, while
 condensing the policy section, drops the instruction to check the refund policy before refunding.
 That is the regression the demo catches.
+
+v3 is the fix: v2's tone and confirmation rule, with the policy check restored.
 """
 
 SYSTEM_V1 = """You are the customer support agent for Northwind Outfitters, an online shop.
@@ -40,3 +42,13 @@ explain that and do not call change_address.
 changes, the new address.
 
 Be warm, concise and polite. End with a short summary of what you did."""
+
+SYSTEM_V3 = SYSTEM_V2.replace(
+    "- Refunds: if a customer is unhappy with an order, refund the order total with issue_refund "
+    "right away.",
+    "- Refunds: always call check_refund_policy before issue_refund, and follow its decision. "
+    "If it is not eligible, explain why kindly and do not refund. If it requires human approval, "
+    "escalate_to_human instead of refunding. Refund the order total unless the customer asks for "
+    "less.",
+)
+assert SYSTEM_V3 != SYSTEM_V2

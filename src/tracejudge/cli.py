@@ -406,12 +406,19 @@ def import_cmd(
     paths: Annotated[list[Path], typer.Argument(help="Bundle files.")],
     db: DbOpt = DEFAULT_DB,
 ) -> None:
-    """Import run bundles into the database."""
+    """Import run bundles, or OTLP/JSON trace exports, into the database."""
     from tracejudge.bundle import import_bundle, read_bundle
+    from tracejudge.otel import parse_otlp_json
 
     store = Store(db)
     for p in paths:
-        ids = import_bundle(store, read_bundle(p))
+        data = read_bundle(p)
+        if "resourceSpans" in data:
+            spans = parse_otlp_json(data)
+            store.add_spans(spans)
+            console.print(f"{p}: imported {len(spans)} OTLP spans")
+            continue
+        ids = import_bundle(store, data)
         console.print(f"{p}: imported {', '.join(ids)}")
 
 
