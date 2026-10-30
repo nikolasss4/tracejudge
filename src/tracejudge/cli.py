@@ -287,3 +287,127 @@ def label(
                     labeler=labeler,
                 )
             )
+
+
+def _resolve_run(store: Store, ref: str) -> Run:
+    """A run id, id prefix, label, or a bundle file (imported into the store)."""
+    path = Path(ref)
+    if path.suffix in (".json", ".gz") and path.exists():
+        from tracejudge.bundle import import_bundle, read_bundle
+
+        ids = import_bundle(store, read_bundle(path))
+        if len(ids) != 1:
+            raise typer.BadParameter(f"{ref} holds {len(ids)} runs; export one run per file")
+        ref = ids[0]
+    run = store.get_run(ref)
+    if run is None:
+        raise typer.BadParameter(f"no run {ref!r}")
+    return run
+
+
+@app.command()
+def diff(
+    baseline: Annotated[str, typer.Argument(help="Run id, label, or bundle file.")],
+    candidate: Annotated[str, typer.Argument(help="Run id, label, or bundle file.")],
+    markdown: Annotated[Path | None, typer.Option(help="Write a markdown report here.")] = None,
+    json_out: Annotated[Path | None, typer.Option("--json")] = None,
+    max_regressions: Annotated[
+        int | None, typer.Option(help="Fail if more cases regress than this.")
+    ] = None,
+    max_pass_rate_drop: Annotated[
+        float | None, typer.Option(help="Fail if pass rate drops by more than this (0-1).")
+    ] = None,
+    max_cost_increase: Annotated[
+        float | None, typer.Option(help="Fail if cost per trial rises by more than this (0.2=20%).")
+    ] = None,
+    min_pass_rate: Annotated[float | None, typer.Option()] = None,
+    viewer_url: Annotated[str | None, typer.Option(help="Link to include in the report.")] = None,
+    db: DbOpt = DEFAULT_DB,
+) -> None:
+    """Compare two runs: per-case flips, cost and latency changes, and a noise check."""
+    from tracejudge.diff import Thresholds, check_thresholds, diff_runs
+    from tracejudge.report import render_markdown
+
+    store = Store(db)
+    a, b = _resolve_run(store, baseline), _resolve_run(store, candidate)
+    d = diff_runs(store, a, b)
+    gates = Thresholds(
+        max_regressions=max_regressions,
+        max_pass_rate_drop=max_pass_rate_drop,
+        max_cost_increase=max_cost_increase,
+        min_pass_rate=min_pass_rate,
+    )
+    problems = check_thresholds(d, gates)
+
+    console.print(
+        f"[bold]{a.label or a.run_id}[/bold] → [bold]{b.label or b.run_id}[/bold]   "
+        f"pass {_pct(d.pass_rate_a)} → {_pct(d.pass_rate_b)} "
+        f"({d.pass_rate_delta * 100:+.1f} pts, p={d.p_value:.3g})   "
+        f"cost/trial ${d.cost_a:.4f} → ${d.cost_b:.4f}   "
+        f"p50 {d.latency_p50_a:.0f} → {d.latency_p50_b:.0f} ms"
+    )
+    changed = [c for c in d.cases if c.status != "unchanged"]
+    if changed:
+        table = Table("case", "status", "baseline", "candidate", "split at", "new failures")
+        colors = {"regressed": "red", "degraded": "yellow", "fixed": "green", "improved": "green"}
+        for c in sorted(changed, key=lambda c: (c.status != "regressed", c.case_id)):
+            split = ""
+            if c.diverged_at is not None:
+                i = c.diverged_at
+                left = c.trajectory_a[i] if i < len(c.trajectory_a) else "(end)"
+                right = c.trajectory_b[i] if i < len(c.trajectory_b) else "(end)"
+                split = f"{i + 1}: {left} → {right}"
+            color = colors.get(c.status, "white")
+            table.add_row(
+                c.case_id,
+                f"[{color}]{c.status}[/{color}]",
+                f"{c.a_passed}/{c.a_trials}",
+                f"{c.b_passed}/{c.b_trials}",
+                split,
+                ", ".join(c.new_failures)[:80],
+            )
+        console.print(table)
+    else:
+        console.print("No case changed outcome.")
+    for note in d.notes:
+        console.print(f"[dim]· {note}[/dim]")
+    if markdown:
+        markdown.parent.mkdir(parents=True, exist_ok=True)
+        markdown.write_text(render_markdown(d, problems, viewer_url))
+    if json_out:
+        json_out.write_text(
+            json.dumps({**d.to_dict(), "gate_failures": problems}, indent=2, default=str)
+        )
+    if problems:
+        for p in problems:
+            console.print(f"[red]✗ {p}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("export")
+def export_cmd(
+    run_ids: Annotated[list[str], typer.Argument(help="Runs to export.")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Bundle file (.json or .json.gz).")],
+    db: DbOpt = DEFAULT_DB,
+) -> None:
+    """Export runs with their traces and labels to a bundle file."""
+    from tracejudge.bundle import export_runs, write_bundle
+
+    store = Store(db)
+    ids = [_resolve_run(store, r).run_id for r in run_ids]
+    write_bundle(export_runs(store, ids), out)
+    console.print(f"wrote {len(ids)} run(s) to {out}")
+
+
+@app.command("import")
+def import_cmd(
+    paths: Annotated[list[Path], typer.Argument(help="Bundle files.")],
+    db: DbOpt = DEFAULT_DB,
+) -> None:
+    """Import run bundles into the database."""
+    from tracejudge.bundle import import_bundle, read_bundle
+
+    store = Store(db)
+    for p in paths:
+        ids = import_bundle(store, read_bundle(p))
+        console.print(f"{p}: imported {', '.join(ids)}")
