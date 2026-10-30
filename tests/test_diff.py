@@ -96,7 +96,10 @@ def test_diff_classifies_cases(tmp_path: Path) -> None:
     md = render_markdown(d, ["1 case(s) regressed (max 0)"])
     assert md.startswith(MARKER)
     assert "Regression gate failed" in md
-    assert "`refund-ineligible` | 3/3 | 0/3 | step 2: `check_policy` → `refund`" in md
+    assert (
+        "| `refund-ineligible` | 3/3 | 0/3 | step 2: `check_policy` → `refund` | "
+        "`precondition:refund<-policy` |" in md
+    )
     assert "**Fixed (1):** `escalate` (1/3→3/3)" in md
 
 

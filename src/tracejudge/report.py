@@ -86,13 +86,15 @@ def render_markdown(
         lines += [
             f"### Newly failing ({len(regressed)})",
             "",
-            "| case | baseline | candidate | trajectory split | why it fails |",
+            "| case | baseline | candidate | trajectory split | newly failing checks |",
             "|:--|--:|--:|:--|:--|",
         ]
         shown = 10
 
         def row(c: CaseDiff) -> str:
-            why = "<br>".join(r.replace("|", "\\|")[:160] for r in c.reasons[:2])
+            # Name the checks that newly fail; the full reasons live in the viewer and the JSON.
+            checks = c.new_failures or [r.split(": ", 1)[0] for r in c.reasons]
+            why = " ".join(f"`{name}`" for name in checks[:3]).replace("|", "\\|")
             return (
                 f"| `{c.case_id}` | {_trials(c, 'a')} | {_trials(c, 'b')} | {_divergence(c)} | "
                 f"{why} |"
@@ -104,7 +106,7 @@ def render_markdown(
             lines += [
                 f"<details><summary>{len(regressed) - shown} more</summary>",
                 "",
-                "| case | baseline | candidate | trajectory split | why it fails |",
+                "| case | baseline | candidate | trajectory split | newly failing checks |",
                 "|:--|--:|--:|:--|:--|",
                 *[row(c) for c in regressed[shown:]],
                 "",

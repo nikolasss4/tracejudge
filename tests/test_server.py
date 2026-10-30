@@ -54,3 +54,12 @@ def test_api(tmp_path: Path) -> None:
     )
     assert c.delete(f"/api/labels/{cr.id}/tone").status_code == 200
     assert c.get("/api/runs/nope").status_code == 404
+
+
+def test_cross_origin_writes_are_refused(tmp_path: Path) -> None:
+    c = TestClient(create_app(Store(tmp_path / "t.db"), otlp_token=""))
+    evil = c.post("/v1/traces", content=b"{}", headers={"origin": "https://evil.example"})
+    assert evil.status_code == 403
+    same = c.post("/v1/traces", content=b"{}", headers={"origin": "http://testserver"})
+    assert same.status_code == 200
+    assert c.get("/api/runs", headers={"origin": "https://evil.example"}).status_code == 200

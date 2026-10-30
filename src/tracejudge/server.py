@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -77,6 +77,18 @@ def _case_rows(results: list[CaseResult]) -> list[dict[str, Any]]:
 def create_app(store: Store, otlp_token: str | None = None) -> FastAPI:
     app = FastAPI(title="tracejudge", version=__version__)
     token = otlp_token if otlp_token is not None else os.environ.get("TRACEJUDGE_OTLP_TOKEN")
+
+    @app.middleware("http")
+    async def same_origin_writes(request: Request, call_next: Any) -> Any:
+        """Refuse cross-site writes. Browsers send an Origin header on cross-origin POSTs, and
+        a plain-text POST needs no CORS preflight, so without this any web page could write
+        labels or traces into a server running on localhost. OTLP exporters send no Origin."""
+        origin = request.headers.get("origin")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and origin:
+            host = request.headers.get("host", "")
+            if origin.split("://", 1)[-1] != host:
+                return JSONResponse({"detail": "cross-origin write refused"}, status_code=403)
+        return await call_next(request)
 
     # ---- OTLP ---------------------------------------------------------------------------
 
