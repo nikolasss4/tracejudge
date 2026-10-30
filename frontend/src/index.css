@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* Colour tokens. Dark is the default; values follow the dataviz reference palette. */
+:root {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #222220;
+  --surface-3: #2c2c2a;
+  --border: rgba(255, 255, 255, 0.1);
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --accent: #3987e5;
+  --series-1: #3987e5; /* blue: llm */
+  --series-2: #d95926; /* orange: tool */
+  --series-3: #199e70; /* aqua: retrieval */
+  --series-5: #d55181; /* magenta: custom */
+  --neutral-mark: #5d5c57; /* agent / container spans */
+  --good: #0ca30c;
+  --good-ink: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --critical-ink: #e66767;
+  --diverge-mid: #383835;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-2: #f3f3f0;
+  --surface-3: #e9e8e3;
+  --border: rgba(11, 11, 11, 0.1);
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --accent: #2a78d6;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-5: #e87ba4;
+  --neutral-mark: #b5b4ac;
+  --good-ink: #006300;
+  --critical-ink: #d03b3b;
+  --diverge-mid: #f0efec;
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+
+@utility card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+@utility tnum { font-variant-numeric: tabular-nums; }
+
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.4rem; padding: 0 0.3rem; height: 1.4rem;
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); background: var(--surface-2);
+}
