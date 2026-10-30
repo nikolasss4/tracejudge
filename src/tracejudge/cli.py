@@ -55,6 +55,12 @@ def print_summary(run: Run) -> None:
         "latency p50 / p95", f"{s['latency_p50_ms']:.0f} ms / {s['latency_p95_ms']:.0f} ms"
     )
     table.add_row("mean LLM steps", f"{s['mean_steps']:.1f}")
+    if s.get("skipped_scores"):
+        table.add_row(
+            "skipped scores", f"[yellow]{s['skipped_scores']}[/yellow] (judge had no fixture/key)"
+        )
+    if s.get("judge_cost_usd"):
+        table.add_row("judge cost", f"${s['judge_cost_usd']:.4f}")
     if s.get("top_failures"):
         table.add_row(
             "top failures", "\n".join(f"{name} ×{n}" for name, n in s["top_failures"][:5])

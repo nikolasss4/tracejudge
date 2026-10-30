@@ -184,6 +184,13 @@ def summarize(results: list[CaseResult], repeats: int) -> dict[str, Any]:
         "latency_p95_ms": percentile(latencies, 95),
         "mean_steps": sum(r.steps for r in results) / n_trials if n_trials else 0,
         "errors": sum(1 for r in results if r.error),
+        "skipped_scores": sum(1 for r in results for sc in r.scores if sc.passed is None),
+        "judge_cost_usd": sum(
+            sc.details.get("cost_usd") or 0
+            for r in results
+            for sc in r.scores
+            if sc.scorer == "judge"
+        ),
         "top_failures": failures.most_common(10),
         "per_case": per_case,
     }
