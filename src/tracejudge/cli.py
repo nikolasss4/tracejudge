@@ -411,3 +411,22 @@ def import_cmd(
     for p in paths:
         ids = import_bundle(store, read_bundle(p))
         console.print(f"{p}: imported {', '.join(ids)}")
+
+
+@app.command()
+def serve(
+    host: Annotated[
+        str, typer.Option(help="Bind address. Use 0.0.0.0 only on trusted networks.")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option()] = 7600,
+    db: DbOpt = DEFAULT_DB,
+) -> None:
+    """Start the trace viewer, the JSON API and the OTLP endpoint (POST /v1/traces)."""
+    import uvicorn
+
+    from tracejudge.server import STATIC_DIR, create_app
+
+    if not STATIC_DIR.exists():
+        console.print("[yellow]UI not built; API only. Run `make ui` to build the viewer.[/yellow]")
+    console.print(f"tracejudge on http://{host}:{port}  ·  OTLP: http://{host}:{port}/v1/traces")
+    uvicorn.run(create_app(Store(db)), host=host, port=port, log_level="warning")
