@@ -163,8 +163,9 @@ runs:
         [ -n "$TJ_MAX_DROP" ] && args+=(--max-pass-rate-drop "$TJ_MAX_DROP")
         [ -n "$TJ_MAX_COST" ] && args+=(--max-cost-increase "$TJ_MAX_COST")
         args+=(--details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
-        COLUMNS=160 tracejudge diff baseline candidate "${args[@]}"
-        code=$?
+        # The runner's bash uses -e; capture the gate's exit code instead of dying on it.
+        code=0
+        COLUMNS=160 tracejudge diff baseline candidate "${args[@]}" || code=$?
         python - "$out/diff.json" >> "$GITHUB_OUTPUT" <<'PY'
         import json, sys
         d = json.load(open(sys.argv[1]))
