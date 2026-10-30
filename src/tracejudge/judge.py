@@ -275,7 +275,7 @@ def make_judge(
 
     info = {
         "model": config.model,
-        "criteria": [c.name for c in config.criteria],
+        "criteria": [{"name": c.name, "description": c.description} for c in config.criteria],
         "fixtures": str(fixtures) if fixtures else None,
     }
     return judge_fn, info

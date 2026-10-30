@@ -186,3 +186,104 @@ def show(run_id: str, db: DbOpt = DEFAULT_DB) -> None:
             )
             table.add_row(r.case_id, str(r.trial), why[:200])
         console.print(table)
+
+
+@app.command()
+def calibrate(
+    run: Annotated[
+        list[str] | None, typer.Option("--run", "-r", help="Limit to these runs.")
+    ] = None,
+    show_disagreements: Annotated[bool, typer.Option("--disagreements", "-d")] = False,
+    json_out: Annotated[Path | None, typer.Option("--json")] = None,
+    db: DbOpt = DEFAULT_DB,
+) -> None:
+    """Judge-vs-human agreement and Cohen's kappa per criterion."""
+    from tracejudge.calibration import calibrate as run_calibration
+    from tracejudge.calibration import interpret_kappa
+
+    store = Store(db)
+    run_ids = None
+    if run:
+        found = [store.get_run(r) for r in run]
+        run_ids = [r.run_id for r in found if r]
+    cals = run_calibration(store, run_ids)
+    if not cals:
+        console.print(
+            "No labelled trials yet. Label some with `tracejudge label RUN` or in the UI."
+        )
+        return
+    table = Table("criterion", "n", "agreement", "kappa", "", "J+H-", "J-H+")
+    for c in cals:
+        k = c.kappa
+        table.add_row(
+            c.criterion,
+            str(c.n),
+            _pct(c.agreement or 0),
+            f"{k:.2f}" if k is not None else "–",
+            interpret_kappa(k),
+            str(c.judge_pass_human_fail),
+            str(c.judge_fail_human_pass),
+        )
+    console.print(table)
+    console.print("[dim]J+H- judge passed, human failed (too lenient) · J-H+ too strict[/dim]")
+    if show_disagreements:
+        for c in cals:
+            for d in c.disagreements:
+                judge_v = "PASS" if d.judge_pass else "FAIL"
+                human_v = "PASS" if d.human_pass else "FAIL"
+                console.print(
+                    f"[bold]{c.criterion}[/bold] {d.case_id}#{d.trial}: judge {judge_v}, "
+                    f"human {human_v}\n  judge: {d.judge_reason}\n  human: {d.human_note or '-'}"
+                )
+    if json_out:
+        json_out.write_text(json.dumps([c.to_dict() for c in cals], indent=2))
+
+
+@app.command()
+def label(
+    run_id: str,
+    criterion: Annotated[str | None, typer.Option("--criterion", "-c")] = None,
+    limit: Annotated[int, typer.Option(help="How many trials to queue.")] = 60,
+    labeler: Annotated[str, typer.Option(envvar="USER")] = "",
+    db: DbOpt = DEFAULT_DB,
+) -> None:
+    """Label judge criteria pass/fail in the terminal (blind to the judge's verdict)."""
+    from tracejudge.calibration import label_queue
+    from tracejudge.judge import render_transcript
+    from tracejudge.models import Label
+    from tracejudge.scorers.deterministic import output_text
+
+    store = Store(db)
+    run = store.get_run(run_id)
+    if run is None:
+        raise typer.BadParameter(f"no run {run_id!r}")
+    judge_cfg = run.config.get("judge") or {}
+    criteria = {c["name"]: c.get("description", "") for c in judge_cfg.get("criteria", [])}
+    queue = label_queue(store, run.run_id, criterion=criterion, limit=limit)
+    console.print(
+        f"{len(queue)} to label. Keys: [bold]p[/bold]ass [bold]f[/bold]ail "
+        "[bold]s[/bold]kip [bold]q[/bold]uit; add a note after a space, e.g. 'f wrong id'."
+    )
+    for i, (cr, name) in enumerate(queue, 1):
+        trace = store.get_trace(cr.trace_id) if cr.trace_id else None
+        console.rule(f"{i}/{len(queue)} · {cr.case_id}#{cr.trial} · criterion [bold]{name}[/bold]")
+        if criteria.get(name):
+            console.print(f"[dim]{criteria[name]}[/dim]")
+        console.print(f"[cyan]input[/cyan] {json.dumps(cr.input)}")
+        if trace:
+            console.print(render_transcript(trace), markup=False)
+        console.print(f"[cyan]final answer[/cyan] {output_text(cr.output)}")
+        answer = typer.prompt("p/f/s/q", default="s").strip()
+        key, _, note = answer.partition(" ")
+        if key == "q":
+            break
+        if key in ("p", "f"):
+            store.set_label(
+                Label(
+                    case_result_id=cr.id,
+                    criterion=name,
+                    human_pass=key == "p",
+                    note=note,
+                    labeler=labeler,
+                )
+            )
