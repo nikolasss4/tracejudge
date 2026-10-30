@@ -1,9 +1,11 @@
 """Judge calibration: how often does the LLM judge agree with human labels?
 
-Humans label a sample of trials pass/fail per criterion (in the viewer's labeling screen or with
-``tracejudge label``). For every criterion we then report raw agreement, Cohen's kappa (agreement
-corrected for chance, which matters when most trials pass) and the confusion matrix, plus the
-disagreements themselves so the rubric can be fixed where the judge goes wrong.
+Humans label a sample of trials pass/fail per judge criterion, and optionally ``overall``
+(should this trial pass at all?), which checks the suite's combined verdict. They label in the
+viewer's labeling screen or with ``tracejudge label``. For every criterion we then report raw
+agreement, Cohen's kappa (agreement corrected for chance, which matters when most trials pass)
+and the confusion matrix, plus the disagreements themselves so the rubric can be fixed where the
+judge goes wrong.
 """
 
 from __future__ import annotations
@@ -91,12 +93,23 @@ class CriterionCalibration:
         }
 
 
+OVERALL = "overall"
+
+
 def judge_verdicts(cr: CaseResult) -> dict[str, tuple[bool, str]]:
-    return {
+    """Automated verdicts a human can be compared against: each judge criterion, plus
+    ``overall``, the trial's combined pass/fail across every scorer."""
+    verdicts = {
         s.name: (s.passed, s.reason)
         for s in cr.scores
         if s.scorer == "judge" and s.passed is not None
     }
+    failing = [f"{s.scorer}:{s.name}" for s in cr.scores if s.passed is False]
+    verdicts[OVERALL] = (
+        cr.passed,
+        "failing: " + ", ".join(failing) if failing else "all checks pass",
+    )
+    return verdicts
 
 
 def calibrate(store: Store, run_ids: list[str] | None = None) -> list[CriterionCalibration]:

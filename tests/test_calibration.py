@@ -83,4 +83,4 @@ def test_label_queue_is_stratified(tmp_path: Path) -> None:
     store.set_label(Label(case_result_id=results[9].id, criterion="policy", human_pass=False))
     remaining = label_queue(store, run.run_id, criterion="policy", limit=100)
     assert len(remaining) == 9
-    assert len(label_queue(store, run.run_id, limit=100)) == 19  # policy + tone
+    assert len(label_queue(store, run.run_id, limit=100)) == 29  # policy + tone + overall

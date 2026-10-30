@@ -204,7 +204,7 @@ def create_app(store: Store, otlp_token: str | None = None) -> FastAPI:
         cr = store.get_case_result(body.case_result_id)
         if cr is None:
             raise HTTPException(404, "no such result")
-        names = {s.name for s in cr.scores if s.scorer == "judge"}
+        names = {s.name for s in cr.scores if s.scorer == "judge"} | {"overall"}
         if body.criterion not in names:
             raise HTTPException(400, f"{body.criterion!r} is not a judge criterion of this trial")
         store.set_label(Label(**body.model_dump()))

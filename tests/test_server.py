@@ -33,10 +33,11 @@ def test_api(tmp_path: Path) -> None:
     d = c.get("/api/diff", params={"a": "v1", "b": "v2"}).json()
     assert [x["case_id"] for x in d["cases"] if x["status"] == "regressed"] == ["refund-ineligible"]
 
-    q = c.get("/api/label-queue", params={"run": "v1"}).json()
+    q = c.get("/api/label-queue", params={"run": "v1", "criterion": "tone"}).json()
     assert q["items"] == [
         {"result_id": cr.id, "case_id": cr.case_id, "trial": cr.trial, "criterion": "tone"}
     ]
+    assert len(c.get("/api/label-queue", params={"run": "v1"}).json()["items"]) == 10
     bad = c.post(
         "/api/labels", json={"case_result_id": cr.id, "criterion": "x", "human_pass": True}
     )
@@ -48,6 +49,8 @@ def test_api(tmp_path: Path) -> None:
     assert ok.status_code == 200
     cal = c.get("/api/calibration").json()
     assert cal[0]["criterion"] == "tone" and cal[0]["agreement"] == 0
-    assert c.get("/api/label-queue", params={"run": "v1"}).json()["items"] == []
+    assert (
+        c.get("/api/label-queue", params={"run": "v1", "criterion": "tone"}).json()["items"] == []
+    )
     assert c.delete(f"/api/labels/{cr.id}/tone").status_code == 200
     assert c.get("/api/runs/nope").status_code == 404

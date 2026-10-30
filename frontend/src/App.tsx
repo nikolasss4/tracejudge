@@ -1,6 +1,9 @@
-import { ListChecks, Moon, Network, Sun } from 'lucide-react'
+import { BarChart3, GitCompare, ListChecks, Moon, Network, Sun, Tags } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Route, Routes } from 'react-router'
+import Compare from './pages/Compare'
+import Dashboard from './pages/Dashboard'
+import LabelPage from './pages/Label'
 import ResultPage from './pages/Result'
 import RunDetailPage from './pages/RunDetail'
 import RunsPage from './pages/Runs'
@@ -8,6 +11,9 @@ import { TracePage, TracesPage } from './pages/Traces'
 
 const NAV = [
   { to: '/', label: 'Runs', icon: ListChecks, end: true },
+  { to: '/compare', label: 'Compare', icon: GitCompare },
+  { to: '/label', label: 'Label', icon: Tags },
+  { to: '/dashboard', label: 'Cost & latency', icon: BarChart3 },
   { to: '/traces', label: 'Traces', icon: Network },
 ]
 
@@ -62,6 +68,9 @@ export default function App() {
           <Route path="/" element={<RunsPage />} />
           <Route path="/runs/:id" element={<RunDetailPage />} />
           <Route path="/results/:id" element={<ResultPage />} />
+          <Route path="/compare" element={<Compare />} />
+          <Route path="/label" element={<LabelPage />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/traces" element={<TracesPage />} />
           <Route path="/traces/:id" element={<TracePage />} />
           <Route path="*" element={<div className="text-[var(--ink-2)]">Not found.</div>} />
