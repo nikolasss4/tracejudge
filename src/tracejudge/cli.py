@@ -321,7 +321,9 @@ def diff(
         float | None, typer.Option(help="Fail if cost per trial rises by more than this (0.2=20%).")
     ] = None,
     min_pass_rate: Annotated[float | None, typer.Option()] = None,
-    viewer_url: Annotated[str | None, typer.Option(help="Link to include in the report.")] = None,
+    details_url: Annotated[
+        str | None, typer.Option(help="Link to include in the report, e.g. the CI run.")
+    ] = None,
     db: DbOpt = DEFAULT_DB,
 ) -> None:
     """Compare two runs: per-case flips, cost and latency changes, and a noise check."""
@@ -373,7 +375,7 @@ def diff(
         console.print(f"[dim]· {note}[/dim]")
     if markdown:
         markdown.parent.mkdir(parents=True, exist_ok=True)
-        markdown.write_text(render_markdown(d, problems, viewer_url))
+        markdown.write_text(render_markdown(d, problems, details_url))
     if json_out:
         json_out.write_text(
             json.dumps({**d.to_dict(), "gate_failures": problems}, indent=2, default=str)

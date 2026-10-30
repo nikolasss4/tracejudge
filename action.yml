@@ -1,0 +1,213 @@
+name: tracejudge eval
+description: Run a tracejudge suite on a pull request, compare it with the base branch, comment the diff and gate on regressions.
+author: nikolasss4
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  suite:
+    description: Path to the suite YAML.
+    required: true
+  agent:
+    description: Candidate agent (module:function). Defaults to the suite's `agent:`.
+    default: ""
+  baseline-agent:
+    description: >
+      Compare against this agent in the same checkout instead of re-running the suite at the
+      base commit. Useful for A/B-ing two agents or prompts.
+    default: ""
+  baseline-ref:
+    description: Git ref or SHA to run the baseline at. Defaults to the pull request's base commit.
+    default: ""
+  repeats:
+    description: Trials per case.
+    default: "3"
+  concurrency:
+    description: Parallel trials.
+    default: "4"
+  max-regressions:
+    description: Fail when more cases than this regress (all trials' majority flips pass -> fail).
+    default: "0"
+  max-pass-rate-drop:
+    description: Fail when the trial pass rate drops by more than this fraction (e.g. 0.05). Empty to disable.
+    default: ""
+  max-cost-increase:
+    description: Fail when cost per trial rises by more than this fraction (e.g. 0.2). Empty to disable.
+    default: ""
+  no-judge:
+    description: Skip LLM-judge criteria.
+    default: "false"
+  comment:
+    description: Post (or update) a summary comment on the pull request.
+    default: "true"
+  github-token:
+    description: "Token used to comment. Needs `pull-requests: write`."
+    default: ${{ github.token }}
+  python-version:
+    description: Python to set up. Empty to use whatever is on the runner.
+    default: "3.12"
+  install:
+    description: Extra command to install the agent's own dependencies (run in the workspace).
+    default: ""
+  working-directory:
+    description: Directory to run in (relative to the workspace).
+    default: "."
+
+outputs:
+  pass-rate:
+    description: Candidate trial pass rate (0-1).
+    value: ${{ steps.diff.outputs.pass-rate }}
+  regressions:
+    description: Number of regressed cases.
+    value: ${{ steps.diff.outputs.regressions }}
+  gate:
+    description: "'pass' or 'fail'."
+    value: ${{ steps.diff.outputs.gate }}
+  report:
+    description: Path to the markdown report.
+    value: ${{ steps.diff.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - if: inputs.python-version != ''
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install tracejudge
+      shell: bash
+      run: python -m pip install --quiet "${{ github.action_path }}"
+
+    - name: Install agent dependencies
+      if: inputs.install != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ inputs.install }}
+
+    - name: Evaluate baseline
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TJ_SUITE: ${{ inputs.suite }}
+        TJ_BASELINE_AGENT: ${{ inputs.baseline-agent }}
+        TJ_BASELINE_REF: ${{ inputs.baseline-ref || github.event.pull_request.base.sha }}
+        TJ_REPEATS: ${{ inputs.repeats }}
+        TJ_CONCURRENCY: ${{ inputs.concurrency }}
+        TJ_NO_JUDGE: ${{ inputs.no-judge }}
+        TJ_WORKDIR: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/tracejudge"
+        mkdir -p "$out"
+        args=(-n "$TJ_REPEATS" -j "$TJ_CONCURRENCY" --db "$out/tj.db" --label baseline)
+        [ "$TJ_NO_JUDGE" = "true" ] && args+=(--no-judge)
+        if [ -n "$TJ_BASELINE_AGENT" ]; then
+          tracejudge eval "$TJ_SUITE" --agent "$TJ_BASELINE_AGENT" "${args[@]}"
+        elif [ -n "$TJ_BASELINE_REF" ]; then
+          git fetch --quiet --depth=1 origin "$TJ_BASELINE_REF" || true
+          git worktree add --quiet --detach "$out/base" "$TJ_BASELINE_REF"
+          base_sha=$(git -C "$out/base" rev-parse HEAD)
+          if [ ! -f "$out/base/$TJ_WORKDIR/$TJ_SUITE" ]; then
+            echo "::warning::$TJ_SUITE does not exist at $TJ_BASELINE_REF; nothing to compare against."
+            touch "$out/no-baseline"
+            exit 0
+          fi
+          (cd "$out/base/$TJ_WORKDIR" && GITHUB_SHA="$base_sha" GITHUB_HEAD_REF="${GITHUB_BASE_REF:-base}" \
+            tracejudge eval "$TJ_SUITE" "${args[@]}")
+        else
+          echo "::warning::No baseline-agent and no base ref (not a pull request?); skipping comparison."
+          touch "$out/no-baseline"
+        fi
+
+    - name: Evaluate candidate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TJ_SUITE: ${{ inputs.suite }}
+        TJ_AGENT: ${{ inputs.agent }}
+        TJ_REPEATS: ${{ inputs.repeats }}
+        TJ_CONCURRENCY: ${{ inputs.concurrency }}
+        TJ_NO_JUDGE: ${{ inputs.no-judge }}
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/tracejudge"
+        args=(-n "$TJ_REPEATS" -j "$TJ_CONCURRENCY" --db "$out/tj.db" --label candidate --json "$out/candidate.json")
+        [ "$TJ_NO_JUDGE" = "true" ] && args+=(--no-judge)
+        [ -n "$TJ_AGENT" ] && args+=(--agent "$TJ_AGENT")
+        tracejudge eval "$TJ_SUITE" "${args[@]}"
+
+    - name: Compare
+      id: diff
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TJ_MAX_REG: ${{ inputs.max-regressions }}
+        TJ_MAX_DROP: ${{ inputs.max-pass-rate-drop }}
+        TJ_MAX_COST: ${{ inputs.max-cost-increase }}
+      run: |
+        set -uo pipefail
+        out="$RUNNER_TEMP/tracejudge"
+        echo "report=$out/report.md" >> "$GITHUB_OUTPUT"
+        if [ -f "$out/no-baseline" ]; then
+          rate=$(python -c "import json;print(json.load(open('$out/candidate.json'))['run']['summary']['pass_rate'])")
+          printf '<!-- tracejudge-report -->\n## tracejudge\n\nNo baseline to compare with. Candidate pass rate: %.1f%%.\n' \
+            "$(python -c "print($rate*100)")" > "$out/report.md"
+          { echo "pass-rate=$rate"; echo "regressions=0"; echo "gate=pass"; } >> "$GITHUB_OUTPUT"
+          cat "$out/report.md" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        args=(--db "$out/tj.db" --markdown "$out/report.md" --json "$out/diff.json")
+        [ -n "$TJ_MAX_REG" ] && args+=(--max-regressions "$TJ_MAX_REG")
+        [ -n "$TJ_MAX_DROP" ] && args+=(--max-pass-rate-drop "$TJ_MAX_DROP")
+        [ -n "$TJ_MAX_COST" ] && args+=(--max-cost-increase "$TJ_MAX_COST")
+        args+=(--details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+        COLUMNS=160 tracejudge diff baseline candidate "${args[@]}"
+        code=$?
+        python - "$out/diff.json" >> "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        print(f"pass-rate={d['pass_rate_b']}")
+        print(f"regressions={sum(c['status'] == 'regressed' for c in d['cases'])}")
+        print(f"gate={'fail' if d['gate_failures'] else 'pass'}")
+        PY
+        cat "$out/report.md" >> "$GITHUB_STEP_SUMMARY"
+        tracejudge export baseline candidate --db "$out/tj.db" -o "$out/runs.json.gz"
+        [ $code -le 1 ] || exit $code
+
+    - name: Upload runs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tracejudge-runs
+        path: |
+          ${{ runner.temp }}/tracejudge/runs.json.gz
+          ${{ runner.temp }}/tracejudge/report.md
+        if-no-files-found: ignore
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        report="$RUNNER_TEMP/tracejudge/report.md"
+        existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+          --jq '.[] | select(.body | startswith("<!-- tracejudge-report -->")) | .id' | head -n1) || true
+        body=$(jq -Rs '{body: .}' < "$report")
+        if [ -n "$existing" ]; then
+          echo "$body" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" --input - >/dev/null \
+            || echo "::warning::could not update the PR comment (token permissions?)"
+        else
+          echo "$body" | gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --input - >/dev/null \
+            || echo "::warning::could not comment on the PR (forks get a read-only token)"
+        fi
+
+    - name: Enforce gate
+      if: steps.diff.outputs.gate == 'fail'
+      shell: bash
+      run: |
+        echo "::error::tracejudge regression gate failed; see the job summary."
+        exit 1

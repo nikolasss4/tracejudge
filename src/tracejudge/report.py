@@ -46,7 +46,7 @@ def _divergence(c: CaseDiff) -> str:
 
 
 def render_markdown(
-    d: RunDiff, problems: list[str] | None = None, viewer_url: str | None = None
+    d: RunDiff, problems: list[str] | None = None, details_url: str | None = None
 ) -> str:
     problems = problems or []
     status = "❌ **Regression gate failed**" if problems else "✅ **No regressions over threshold**"
@@ -89,15 +89,28 @@ def render_markdown(
             "| case | baseline | candidate | trajectory split | why it fails |",
             "|:--|--:|--:|:--|:--|",
         ]
-        for c in regressed[:25]:
+        shown = 10
+
+        def row(c: CaseDiff) -> str:
             why = "<br>".join(r.replace("|", "\\|")[:160] for r in c.reasons[:2])
-            lines.append(
+            return (
                 f"| `{c.case_id}` | {_trials(c, 'a')} | {_trials(c, 'b')} | {_divergence(c)} | "
                 f"{why} |"
             )
-        if len(regressed) > 25:
-            lines.append(f"| … {len(regressed) - 25} more | | | | |")
+
+        lines += [row(c) for c in regressed[:shown]]
         lines.append("")
+        if len(regressed) > shown:
+            lines += [
+                f"<details><summary>{len(regressed) - shown} more</summary>",
+                "",
+                "| case | baseline | candidate | trajectory split | why it fails |",
+                "|:--|--:|--:|:--|:--|",
+                *[row(c) for c in regressed[shown:]],
+                "",
+                "</details>",
+                "",
+            ]
     for status, title in (("fixed", "Fixed"), ("degraded", "Less reliable")):
         items = d.by_status(status)  # type: ignore[arg-type]
         if items:
@@ -109,6 +122,9 @@ def render_markdown(
         lines += ["<details><summary>Is this noise?</summary>", ""]
         lines += [f"- {n}" for n in d.notes]
         lines += ["", "</details>", ""]
-    if viewer_url:
-        lines.append(f"[Open the diff in the trace viewer]({viewer_url})")
+    if details_url:
+        lines.append(
+            f"[Workflow run]({details_url}) · to browse the traces, download the `tracejudge-runs` "
+            "artifact, then `tracejudge import runs.json.gz && tracejudge serve`."
+        )
     return "\n".join(lines).rstrip() + "\n"

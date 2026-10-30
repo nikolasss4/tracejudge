@@ -1,0 +1,25 @@
+name: regression-demo
+
+# Run by hand to see the full report for the demo regression: agent v1 vs v2 in one checkout.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    env:
+      SIM_LATENCY: "0.1"
+    steps:
+      - uses: actions/checkout@v4
+      - id: tj
+        uses: ./
+        continue-on-error: true
+        with:
+          suite: examples/support_agent/suite.yaml
+          baseline-agent: examples.support_agent.agent:run_v1
+          agent: examples.support_agent.agent:run_v2
+          comment: "false"
+      - run: echo "gate=${{ steps.tj.outputs.gate }} regressions=${{ steps.tj.outputs.regressions }}"
