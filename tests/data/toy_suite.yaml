@@ -1,0 +1,23 @@
+name: toy
+agent: tests.agents.toy:agent
+repeats: 2
+defaults:
+  expect:
+    budget: {max_steps: 3}
+cases:
+  - id: add-small
+    tags: [math]
+    input: {a: 2, b: 3}
+    expect:
+      final_answer: {contains: ["5"]}
+      tool_calls: [{name: add, args: {a: 2, b: 3}}]
+  - id: add-wrong-expectation
+    input: {a: 2, b: 2}
+    expect:
+      final_answer: {contains: ["5"]}
+  - id: crash
+    input: {crash: true}
+  - id: flaky
+    input: {a: 1, b: 1, flaky: 0}
+    expect:
+      final_answer: {contains: ["2"]}
